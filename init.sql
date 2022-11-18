@@ -1,0 +1,6 @@
+ALTER SYSTEM SET max_connections = 1000;
+ALTER SYSTEM RESET shared_buffers;
+CREATE USER movies WITH PASSWORD 'movies';
+CREATE DATABASE movies;
+GRANT ALL PRIVILEGES ON DATABASE "movies" to movies;
+ALTER DATABASE movies OWNER TO movies;
