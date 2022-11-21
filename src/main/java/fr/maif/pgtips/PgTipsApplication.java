@@ -15,8 +15,6 @@ public class PgTipsApplication {
 		SpringApplication.run(PgTipsApplication.class, args);
 	}
 
-
-
 	@Bean
 	ConnectionFactoryInitializer initializer(ConnectionFactory connectionFactory) {
 		ConnectionFactoryInitializer initializer = new ConnectionFactoryInitializer();

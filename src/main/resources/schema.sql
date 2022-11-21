@@ -27,6 +27,8 @@ create table if not exists episode(
     "episodeNumber" numeric,
     UNIQUE("tconst", "parentTconst", "seasonNumber","episodeNumber")
 );
+create index if not exists episode_tconst_idx on episode(tconst);
+create index if not exists episode_parenttconst_idx on episode("parentTconst");
 
 create table if not exists show_crew(
     "tconst"	varchar(100) references show("tconst"),
@@ -37,3 +39,5 @@ create table if not exists show_crew(
     "characters" text[],
     UNIQUE("tconst", "nconst")
 );
+
+create index if not exists show_type_idx on show ("titleType");

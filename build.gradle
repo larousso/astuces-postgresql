@@ -22,6 +22,7 @@ repositories {
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-data-r2dbc'
 	implementation 'org.springframework.boot:spring-boot-starter-webflux'
+	implementation 'io.vavr:vavr:0.10.4'
 	compileOnly 'org.projectlombok:lombok'
 //	implementation("io.r2dbc:r2dbc-pool")
 //	implementation("org.postgresql:postgresql:$postgresqlVersion")
