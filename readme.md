@@ -41,40 +41,7 @@ erDiagram
         numeric seasonNumber
         numeric episodeNumber
     }
-    SHOW ||--|{ SHOW_CREW : a_plusieur
-    SHOW_CREW {
-        varchar tconst
-        text ordering
-        varchar nconst
-        text category
-        text job
-        array characters
-    }
-    SHOW_CREW ||--|| PEOPLE : a 
-    PEOPLE {
-        varchar nconst
-        text primaryName
-        numeric birthYear
-        numeric deathYear
-        text primaryProfession
-        array knownForTitles
-    }
-
 ```
-
-## Lancer la base 
-
-```
-docker-compose up
-```
-
-## Lancer l'app 
-
-```
-./gradlew bootRun
-```
-
-Le lancement de l'app va démarrer le serveur et initialiser les tables de la BDD à partir de `src/main/resources/schema.sql`. 
 
 ## 1 Les colonnes générées et la recherche full text
 
@@ -312,14 +279,79 @@ where ss."search" @@ plainto_tsquery('game throne')
 limit 50;
 ```
 
+Exemple dans une API : 
+
+```java
+
+ @GetMapping("/api/shows")
+ Flux<Movie> listMovies(@RequestParam(name = "page", defaultValue = "1") Integer page,
+                        @RequestParam(name = "size", defaultValue = "20") Integer size,
+                        @RequestParam(name = "type", required = false) TitleType showType,
+                        @RequestParam(name = "title", required = false) String title) {
+     Integer offset = (page - 1) * size;
+
+     var conditions = conditions(
+             Optional.ofNullable(showType).map(t -> cond("s.\"titleType\" = %s", t.value)),
+             Optional.ofNullable(title).map(t -> cond("ss.\"search\" @@ plainto_tsquery('english', %s )", t))
+     );
+
+     return conditions.bindTo(client.sql("""
+                                 select row_to_json(s)::jsonb || json_build_object('episodes', array(
+                                     select row_to_json(e)::jsonb || row_to_json(ep)::jsonb
+                                     from episode ep
+                                     join show e on ep."tconst" = e.tconst
+                                     where ep."parentTconst" = s.tconst
+                                 ))::jsonb
+                                 from show s
+                                 join show_search ss on s.tconst = ss.tconst
+                                  %s
+                                 offset %s
+                                 limit %s
+                             """.formatted(
+                             conditions.sqlClauseWithWhere(),
+                             conditions.index(1),
+                             conditions.index(2)
+                     )
+             ))
+             .bind(conditions.index(1), offset)
+             .bind(conditions.index(2), size)
+             .map(r -> r.get(0, String.class))
+             .all()
+             .flatMap(json -> {
+                 try {
+                     return Mono.just(mapper.readValue(json, Movie.class));
+                 } catch (JsonProcessingException e) {
+                     return Mono.error(e);
+                 }
+             });
+ }
+```
+
 ```bash
 curl -XGET 'http://localhost:8080/api/shows?size=5&type=TVSERIES&title=chainsaw%20man' | jless
 ```
 
+## 5 select for update
 
+## 6 stratégies de migration 
 
-## Set up des données
+## Jouer avec le projet 
 
+### Lancer la base
+
+```
+docker-compose up
+```
+
+### Lancer l'application
+
+```
+./gradlew bootRun
+```
+
+Le lancement de l'app va démarrer le serveur et initialiser les tables de la BDD à partir de `src/main/resources/schema.sql`.
+
+### Set up des données 
 
 Se connecter sur le container pour utiliser copy :
 
