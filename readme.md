@@ -2,12 +2,12 @@
 
 Quelques petit truc utils en postgresql dans le dév de tous les jours  : 
 
-
  1. faire de la recherche full texte + colonne calculée
  2. faire des upsert
  3. requêter les données en JSON
  4. recupérer les données générées lors d'un insert ou d'un update
- 5. gérer un singleton sur une infra multi serveur
+ 5. select for update  
+ 6. gérer les migrations: table tmp, not valid, concurrently 
 
 
 ## Data set 

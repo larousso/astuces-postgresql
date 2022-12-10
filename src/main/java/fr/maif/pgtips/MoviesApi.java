@@ -3,7 +3,6 @@ package fr.maif.pgtips;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.vavr.control.Option;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,13 +16,11 @@ import reactor.core.publisher.Mono;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static fr.maif.pgtips.MoviesApi.BindWrapper.binder;
-import static fr.maif.pgtips.MoviesApi.Condition.cond;
-import static fr.maif.pgtips.MoviesApi.Conditions.conditions;
-import static java.util.function.Function.identity;
+import static fr.maif.pgtips.Sql.BindWrapper.binder;
+import static fr.maif.pgtips.Sql.Condition.cond;
+import static fr.maif.pgtips.Sql.Conditions.conditions;
 
 @RestController
 public class MoviesApi {
@@ -110,21 +107,19 @@ public class MoviesApi {
                 });
     }
 
-    record MovieDto(String titleType,
-                    String primaryTitle,
-                    String originalTitle,
-                    Boolean isAdult,
-                    Integer startYear,
-                    Integer endYear,
-                    Integer runtimeMinutes,
-                    List<String> genres,
-                    List<Episode> episodes) {
+    record UpsertMovie(String titleType,
+                       String primaryTitle,
+                       String originalTitle,
+                       Boolean isAdult,
+                       Integer startYear,
+                       Integer endYear,
+                       Integer runtimeMinutes,
+                       List<String> genres) {
 
     }
 
-
     @PutMapping("/api/shows/{id}")
-    public Mono<Movie> putMovie(@PathVariable("id") String id, @RequestBody MovieDto movie) {
+    public Mono<Movie> putMovie(@PathVariable("id") String id, @RequestBody UpsertMovie movie) {
         return binder(client
                 .sql("""
                         insert into show(
@@ -140,7 +135,7 @@ public class MoviesApi {
                             "createdAt",
                             "updatedAt"
                         ) values              
-                              ($1, $2, $3, $3, $4, $5, $6 , $7, $8::text[], now(), now())
+                              ($1, $2, $3, $4, $5, $6, $7 , $8, $9::text[], now(), now())
                         on conflict ("tconst")
                             do update set
                               "titleType" = excluded."titleType",
@@ -156,13 +151,14 @@ public class MoviesApi {
                         """)
         )
                 .bind("$1", id, String.class)
-                .bind("$2", movie.primaryTitle(), String.class)
-                .bind("$3", movie.originalTitle(), String.class)
-                .bind("$4", movie.isAdult(), Boolean.class)
-                .bind("$5", movie.startYear(), Integer.class)
-                .bind("$6", movie.endYear(), Integer.class)
-                .bind("$7", movie.runtimeMinutes(), Integer.class)
-                .bind("$8", movie.genres().toArray(String[]::new), String[].class)
+                .bind("$2", movie.titleType(), String.class)
+                .bind("$3", movie.primaryTitle(), String.class)
+                .bind("$4", movie.originalTitle(), String.class)
+                .bind("$5", movie.isAdult(), Boolean.class)
+                .bind("$6", movie.startYear(), Integer.class)
+                .bind("$7", movie.endYear(), Integer.class)
+                .bind("$8", movie.runtimeMinutes(), Integer.class)
+                .bind("$9", movie.genres().toArray(String[]::new), String[].class)
                 .get()
                 .map(r -> r.get(0, String.class))
                 .one()
@@ -173,67 +169,6 @@ public class MoviesApi {
                         return Mono.error(e);
                     }
                 });
-    }
-
-    record BindWrapper(DatabaseClient.GenericExecuteSpec spec) {
-        static BindWrapper binder(DatabaseClient.GenericExecuteSpec spec) {
-            return new BindWrapper(spec);
-        }
-        public <T> BindWrapper bind(String key, T obj, Class<T> clazz) {
-            if (obj == null) {
-                return new BindWrapper(spec.bindNull(key, clazz));
-            } else {
-                return new BindWrapper(spec.bind(key, obj));
-            }
-        }
-        public DatabaseClient.GenericExecuteSpec get() {
-            return spec;
-        }
-    }
-
-    record Condition(String condition, String binding, String value) {
-        public static Condition cond(String condition, String value) {
-            return new Condition(condition, null, value);
-        }
-    }
-
-    record Conditions(io.vavr.collection.List<Condition> conditions) {
-
-        @SafeVarargs
-        public static Conditions conditions(Optional<Condition>... conditions) {
-            return new Conditions(io.vavr.collection.List.of(conditions)
-                    .flatMap(Option::ofOptional)
-                    .zipWithIndex()
-                    .map(t -> {
-                        int index = t._2 + 1;
-                        String binding = "$" + index;
-                        return new Condition(t._1.condition.formatted(binding), binding, t._1.value);
-                    }));
-        }
-
-        public DatabaseClient.GenericExecuteSpec bindTo(DatabaseClient.GenericExecuteSpec spec) {
-
-            return io.vavr.collection.List.ofAll(conditions).foldLeft(spec, (s, c) -> s.bind(c.binding(), c.value));
-        }
-
-        public String sqlClauseWithWhere() {
-            return sqlClause(" where ");
-        }
-
-        public String sqlClause(String prefix) {
-            if (conditions.isEmpty()) {
-                return "";
-            }
-            return conditions.map(c -> c.condition).mkString(prefix, " and ", "");
-        }
-
-        public int index() {
-            return conditions.length();
-        }
-
-        public String index(int i) {
-            return "$" + (index() + i);
-        }
     }
 
     enum TitleType {
