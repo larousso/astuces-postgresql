@@ -32,7 +32,7 @@ erDiagram
         numeric startYear
         numeric endYear
         numeric runtimeMinutes
-        string genres
+        array genres
     }
     EPISODE ||--|| SHOW : est
     EPISODE {
@@ -48,7 +48,7 @@ erDiagram
         varchar nconst
         text category
         text job
-        text characters
+        array characters
     }
     SHOW_CREW ||--|| PEOPLE : a 
     PEOPLE {
@@ -57,7 +57,7 @@ erDiagram
         numeric birthYear
         numeric deathYear
         text primaryProfession
-        text knownForTitles
+        array knownForTitles
     }
 
 ```
