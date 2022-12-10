@@ -18,6 +18,50 @@ Imdb :
  * https://www.imdb.com/interfaces/
  * https://datasets.imdbws.com/
 
+## Modèle : 
+
+```mermaid
+erDiagram
+    SHOW ||--|{ EPISODE : a_plusieur
+    SHOW {
+        string tconst
+        text titleType
+        text primaryTitle
+        text originalTitle
+        bool isAdult
+        numeric startYear
+        numeric endYear
+        numeric runtimeMinutes
+        string[] genres
+    }
+    EPISODE ||--|| SHOW : est
+    EPISODE {
+        text tconst
+        text parentTconst
+        numeric seasonNumber
+        numeric episodeNumber
+    }
+    SHOW ||--|{ SHOW_CREW : a_plusieur
+    SHOW_CREW {
+        varchar tconst
+        text ordering
+        varchar nconst
+        text category
+        text job
+        text[] characters
+    }
+    SHOW_CREW ||--|| PEOPLE : a 
+    PEOPLE {
+        varchar nconst
+        text primaryName
+        numeric birthYear
+        numeric deathYear
+        text primaryProfession
+        text[] knownForTitles
+    }
+
+```
+
 ## Lancer la base 
 
 ```
