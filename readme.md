@@ -76,8 +76,249 @@ docker-compose up
 
 Le lancement de l'app va démarrer le serveur et initialiser les tables de la BDD à partir de `src/main/resources/schema.sql`. 
 
+## 1 Les colonnes générées et la recherche full text
 
-## Set up des données  
+
+```sql
+alter table show
+    add column "nameIndex" tsvector
+        GENERATED ALWAYS AS (to_tsvector('english', "primaryTitle") || to_tsvector('english', "originalTitle") ) stored;
+
+create index show_name_index_idx on show using gin("nameIndex");
+```
+
+Recherche "full text" sur la colonne calculée :  
+
+```sql
+select *
+from show s
+where
+s."nameIndex" @@ plainto_tsquery('english', 'chainsaw man')
+and s."titleType" = 'tvSeries';
+```
+
+Si on met à jour un des 2 champs texte, ça met à jour la colonne calculée : 
+
+```sql 
+update show
+set "primaryTitle" = 'Edgar Allan Poooo'
+where tconst = 'tt0000854';
+```
+
+
+## 2 Les upsert
+
+On créé une table de search dédiée à la recherche full text. 
+
+ * `tconst` est la clé primaire mais aussi une foreign key vers l'id du show
+ * `on delete cascade` : si un show est supprimé alors show_search le sera aussi 
+
+```sql
+create table show_search(
+    "tconst" varchar(100) primary key references show("tconst") on delete cascade,
+    search tsvector
+);
+create index show_search_search_idx on show_search using gin("search");
+```
+
+On peut initialiser cette table en utilisant "insert select" : 
+
+```sql
+insert into show_search
+select
+    "tconst",
+    to_tsvector('english', "primaryTitle") || to_tsvector('english', "originalTitle") as search
+from show;
+```
+
+`9,379,384 rows affected in 4 m 54 s 162 ms` 
+
+Maintenant on veut mettre à jour un index pour un id, mais comment savoir si la ligne existe déjà ? 
+
+```sql
+insert into show_search
+select
+    "tconst",
+    to_tsvector('english', "primaryTitle") || to_tsvector('english', "originalTitle") as search
+from show
+where tconst = 'tt0089530'
+on conflict ("tconst")
+    do update set search = excluded.search;
+```
+
+Ou depuis postgresql 15 `MERGE` ? 
+
+## 3 returning 
+
+On ajoute des colonnes qui seront gérées par la base:
+```sql 
+alter table show add column if not exists "createdAt" timestamp;
+alter table show add column if not exists "updatedAt" timestamp;
+```
+
+L'idée c'est de pouvoir faire un upsert et de pouvoir avoir les valeurs générée par la base en retour. 
+
+Dans cette requête, `createdAt` et `updatedAt` sont valorisée lors d'un insert mais lors d'un update, seulement `updatedAt` est mis à jour : 
+
+```sql
+insert into show(
+   "tconst",
+   "titleType",
+   "primaryTitle",
+   "originalTitle",
+   "isAdult",
+   "startYear",
+   "endYear",
+   "runtimeMinutes",
+   "genres",
+   "createdAt",
+   "updatedAt"
+) values
+   ('tt0008529','movie','Sacrifice','Sacrifice',false,1917, null ,50, '{"Drama","War"}'::text[], now(), now())
+   on conflict ("tconst")
+do update set
+   "titleType" = excluded."titleType",
+   "primaryTitle" = excluded."primaryTitle",
+   "originalTitle" = excluded."originalTitle",
+   "isAdult" = excluded."isAdult",
+   "startYear" = excluded."startYear",
+   "endYear" = excluded."endYear",
+   "runtimeMinutes" = excluded."runtimeMinutes",
+   "genres" = excluded."genres",
+   "updatedAt" = now()
+returning show.*;
+```
+
+En utilisant `returning show.*` toutes les colonnes de la ligne mise à jour de show sont retournée. 
+
+On peut aussi utiliser `returning row_to_json(show)` pour avoir le resultat en json. 
+
+Si on expose une API ainsi : 
+
+```java
+
+ @PutMapping("/api/shows/{id}")
+ public Mono<Movie> putMovie(@PathVariable("id") String id, @RequestBody UpsertMovie movie) {
+     return binder(client
+             .sql("""
+                     insert into show(
+                         "tconst",
+                         "titleType",
+                         "primaryTitle",
+                         "originalTitle",
+                         "isAdult",
+                         "startYear",
+                         "endYear",
+                         "runtimeMinutes",
+                         "genres",
+                         "createdAt",
+                         "updatedAt"
+                     ) values              
+                           ($1, $2, $3, $4, $5, $6, $7 , $8, $9::text[], now(), now())
+                     on conflict ("tconst")
+                         do update set
+                           "titleType" = excluded."titleType",
+                           "primaryTitle" = excluded."primaryTitle",
+                           "originalTitle" = excluded."originalTitle",
+                           "isAdult" = excluded."isAdult",
+                           "startYear" = excluded."startYear",
+                           "endYear" = excluded."endYear",
+                           "runtimeMinutes" = excluded."runtimeMinutes",
+                           "genres" = excluded."genres",
+                           "updatedAt" = now()
+                     returning row_to_json(show)
+                     """)
+     )
+             .bind("$1", id, String.class)
+             .bind("$2", movie.titleType(), String.class)
+             .bind("$3", movie.primaryTitle(), String.class)
+             .bind("$4", movie.originalTitle(), String.class)
+             .bind("$5", movie.isAdult(), Boolean.class)
+             .bind("$6", movie.startYear(), Integer.class)
+             .bind("$7", movie.endYear(), Integer.class)
+             .bind("$8", movie.runtimeMinutes(), Integer.class)
+             .bind("$9", movie.genres().toArray(String[]::new), String[].class)
+             .get()
+             .map(r -> r.get(0, String.class))
+             .one()
+             .flatMap(json -> {
+                 try {
+                     return Mono.just(mapper.readValue(json, Movie.class));
+                 } catch (JsonProcessingException e) {
+                     return Mono.error(e);
+                 }
+             });
+ }
+```
+
+Et qu'on fait le PUT suivant, en retour on aura bien les dates générées 
+
+```bash
+curl -XPUT 'http://localhost:8080/api/shows/tt13616990' -H 'content-type: application/json' -d '{
+  "endYear": null,
+  "isAdult": false,
+  "startYear": 2022,
+  "titleType": "tvSeries",
+  "primaryTitle": "Chainsaw Man",
+  "originalTitle": "Chainsaw Man",
+  "runtimeMinutes": null,
+  "genres": [
+    "Action",
+    "Adventure",
+    "Animation"
+  ]
+}' 
+```
+
+## 4 select en json 
+
+L'intéret du select en json c'est de pouvoir facilement parser le résultat en java. On peut dans le select récupérer un grape de données complète. 
+
+Ici on récupérer le show et les episodes du show si ils existent. Pour récupérer les épisodes on va faire un select dans le select. 
+L'intéret est de complétement séparer ce qui de l'ordre du filtre : les shows que je veux trouver, et ce qui de l'ordre des données retournées : le détail du show et de ses épisodes. 
+
+Par exemple avec la requête suivante : 
+
+```sql
+select 
+    s, -- les données du show 
+    array (select e -- ici on fait un select dans le select pour obtenir les episodes du show 
+      from episode ep
+      join show e on ep."tconst" = e.tconst
+      where ep."parentTconst" = s.tconst -- on retrouve tous les épisodes qui ont "s" comme parent.
+    )
+-- à partir de la, on est sur la partie filtre des lignes 
+from show s
+join show_search ss on s.tconst = ss.tconst
+where
+   ss."search" @@ plainto_tsquery('chainsaw man') -- on récupère le show "chainsaw man" 
+   and s."titleType" = 'tvSeries';
+```
+
+Maintenant on ajoute du json 
+
+```sql
+select row_to_json(s)::jsonb || -- s est transformé en json, le || permet de merger 2 json  
+    json_build_object('episodes', array( -- on créé un object json qui a une clé 'episodes' dont la valeur est un tableau de json  
+       select row_to_json(e)::jsonb || row_to_json(ep)::jsonb -- chaque élément du tableau est le show de l'épisode + l'épisode. 
+       from episode ep
+       join show e on ep."tconst" = e.tconst
+       where ep."parentTconst" = s.tconst
+   ))::jsonb
+from show s
+join show_search ss on s.tconst = ss.tconst
+where ss."search" @@ plainto_tsquery('game throne')
+  and s."titleType" = 'tvSeries'
+limit 50;
+```
+
+```bash
+curl -XGET 'http://localhost:8080/api/shows?size=5&type=TVSERIES&title=chainsaw%20man' | jless
+```
+
+
+
+## Set up des données
 
 
 Se connecter sur le container pour utiliser copy :
@@ -87,7 +328,7 @@ docker-compose exec tips_postgres bash
 ```
 
 
-Créer des tables tmp pour pouvoir retravailler les données 
+Créer des tables tmp pour pouvoir retravailler les données
 
 ```sql
 create table if not exists show_import(
@@ -125,7 +366,7 @@ create table if not exists show_crew_import(
 );
 ```
 
-Sur le container : 
+Sur le container :
 ```
 PGPASSWORD="movies" psql -h localhost -p 5432 -U movies -d movies -c "\copy show_import from '/home/pg/title.basics.tsv' with NULL '\N' DELIMITER E'\t' CSV HEADER QUOTE E'\b';"
 ```
@@ -195,132 +436,4 @@ from show_crew_import
 where
     exists(select from show where show."tconst" = show_crew_import."tconst") and
     exists(select from people where people."nconst" = show_crew_import."nconst")
-```
-
-## 1 Les colonnes générées et la recherche full text
-
-
-```sql
-alter table show
-    add column "nameIndex" tsvector
-        GENERATED ALWAYS AS (to_tsvector('english', "primaryTitle") || to_tsvector('english', "originalTitle") ) stored;
-
-create index show_name_index_idx on show using gin("nameIndex");
-```
-
-
-## 2 Les upsert
-
-On créé une table de search dédiée à la recherche full text. 
-
- * tconst est la clé primaire mais aussi une foreign key vers l'id du show
-   * on delete cascade : si un show est supprimé alors show_search le sera aussi 
-
-```sql
-create table show_search(
-    "tconst" varchar(100) primary key references show("tconst") on delete cascade,
-    search tsvector
-);
-create index show_search_search_idx on show_search using gin("search");
-```
-
-On peut initialiser cette table en utilisant "insert select" : 
-
-```sql
-insert into show_search
-select
-    "tconst",
-    to_tsvector('english', "primaryTitle") || to_tsvector('english', "originalTitle") as search
-from show;
-```
-
-`9,379,384 rows affected in 4 m 54 s 162 ms` 
-
-Maintenant on veut mettre à jour un index pour un id, mais comment savoir si la ligne existe déjà ? 
-
-```sql
-insert into show_search
-select
-    "tconst",
-    to_tsvector('english', "primaryTitle") || to_tsvector('english', "originalTitle") as search
-from show
-where tconst = 'tt0089530'
-on conflict ("tconst")
-    do update set search = excluded.search;
-```
-
-Ou depuis postgresql 15 `MERGE` ? 
-
-## 3 select en json 
-
-```sql
-select row_to_json(s)::jsonb || json_build_object('episodes', array(
-    select row_to_json(e)::jsonb || row_to_json(ep)::jsonb
-    from episode ep
-    join show e on ep."tconst" = e.tconst
-    where ep."parentTconst" = s.tconst
-))::jsonb
-from show s
-join show_search ss on s.tconst = ss.tconst
-where ss."search" @@ plainto_tsquery('game throne')
-  and s."titleType" = 'tvSeries'
-limit 50;
-```
-
-```bash
-curl -XGET 'http://localhost:8080/api/shows?size=5&type=TVSERIES&title=chainsaw%20man' | jless
-```
-
-## 4 returning 
-
-On ajoute des colonnes qui seront gérées par la base: 
-```sql 
-alter table show add column if not exists "createdAt" timestamp;
-alter table show add column if not exists "updatedAt" timestamp;
-```
-
-```sql
-insert into show(
-   "tconst",
-   "titleType",
-   "primaryTitle",
-   "originalTitle",
-   "isAdult",
-   "startYear",
-   "endYear",
-   "runtimeMinutes",
-   "genres",
-   "createdAt",
-   "updatedAt"
-) values
-   ('tt0008529','movie','Sacrifice','Sacrifice',false,1917, null ,50, '{"Drama","War"}'::text[], now(), now())
-   on conflict ("tconst")
-do update set
-   "titleType" = excluded."titleType",
-   "primaryTitle" = excluded."primaryTitle",
-   "originalTitle" = excluded."originalTitle",
-   "isAdult" = excluded."isAdult",
-   "startYear" = excluded."startYear",
-   "endYear" = excluded."endYear",
-   "runtimeMinutes" = excluded."runtimeMinutes",
-   "genres" = excluded."genres",
-   "updatedAt" = now()
-returning row_to_json(show);
-```
-
-```bash
-curl -XPUT 'http://localhost:8080/api/shows/tt13616990' -H 'content-type: application/json' -d '{
-  "endYear": null,
-  "isAdult": false,
-  "startYear": 2022,
-  "titleType": "tvSeries",
-  "primaryTitle": "Chainsaw Man",
-  "originalTitle": "Chainsaw Man",
-  "runtimeMinutes": null,
-  "genres": [
-    "Action",
-    "Adventure",
-    "Animation"
-  ]
-}' 
 ```
