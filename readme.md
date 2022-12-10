@@ -24,7 +24,7 @@ Imdb :
 erDiagram
     SHOW ||--|{ EPISODE : a_plusieur
     SHOW {
-        string tconst
+        varchar tconst
         text titleType
         text primaryTitle
         text originalTitle
@@ -36,7 +36,7 @@ erDiagram
     }
     EPISODE ||--|| SHOW : est
     EPISODE {
-        text tconst
+        varchar tconst
         text parentTconst
         numeric seasonNumber
         numeric episodeNumber
