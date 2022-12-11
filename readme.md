@@ -1,11 +1,11 @@
 # Quelques astuces postgresql 
 
-Quelques petit truc utils en postgresql dans le dév de tous les jours  : 
+Quelque petit truc utils en postgresql dans le dév de tous les jours : 
 
- 1. faire de la recherche full texte + colonne calculée
+ 1. faire de la recherche full text + colonne calculée
  2. faire des upsert
  3. requêter les données en JSON
- 4. recupérer les données générées lors d'un insert ou d'un update
+ 4. récupérer les données générées lors d'un insert ou d'un update
  5. select for update  
  6. gérer les migrations: table tmp, not valid, concurrently 
 
@@ -75,7 +75,7 @@ where tconst = 'tt0000854';
 
 ## 2 Les upsert
 
-On créé une table de search dédiée à la recherche full text. 
+On crée une table de search dédiée à la recherche full text. 
 
  * `tconst` est la clé primaire mais aussi une foreign key vers l'id du show
  * `on delete cascade` : si un show est supprimé alors show_search le sera aussi 
@@ -113,19 +113,19 @@ on conflict ("tconst")
     do update set search = excluded.search;
 ```
 
-Depuis postgresql 15, il existe `MERGE` mais pour le moment j'ai pas testé.  
+Depuis postgresql 15, il existe `MERGE` mais pour le moment, je n'ai pas testé.  
 
 ## 3 returning 
 
-On ajoute des colonnes qui seront gérées par la base:
+On ajoute des colonnes qui seront gérées par la base :
 ```sql 
 alter table show add column if not exists "createdAt" timestamp;
 alter table show add column if not exists "updatedAt" timestamp;
 ```
 
-L'idée c'est de pouvoir faire un upsert et de pouvoir avoir les valeurs générée par la base en retour. 
+L'idée, c'est de pouvoir faire un upsert et de pouvoir avoir les valeurs générées par la base en retour. 
 
-Dans cette requête, `createdAt` et `updatedAt` sont valorisée lors d'un insert mais lors d'un update, seulement `updatedAt` est mis à jour : 
+Dans cette requête, `createdAt` et `updatedAt` sont valorisée lors d'un insert, mais lors d'un update, seulement `updatedAt` est mis à jour : 
 
 ```sql
 insert into show(
@@ -158,7 +158,7 @@ returning show.*;
 
 En utilisant `returning show.*` toutes les colonnes de la ligne mise à jour de show sont retournée. 
 
-On peut aussi utiliser `returning row_to_json(show)` pour avoir le resultat en json. 
+On peut aussi utiliser `returning row_to_json(show)` pour avoir le résultat en json. 
 
 Si on expose une API ainsi : 
 
@@ -218,7 +218,7 @@ Si on expose une API ainsi :
  }
 ```
 
-Et qu'on fait le PUT suivant, en retour on aura bien les dates générées 
+Et qu'on fait le PUT suivant, en retour, on aura bien les dates générées 
 
 ```bash
 curl -XPUT 'http://localhost:8080/api/shows/tt13616990' -H 'content-type: application/json' -d '{
@@ -239,10 +239,10 @@ curl -XPUT 'http://localhost:8080/api/shows/tt13616990' -H 'content-type: applic
 
 ## 4 select en json 
 
-L'intéret du select en json c'est de pouvoir facilement parser le résultat en java. On peut dans le select récupérer un grape de données complète. 
+L'intérêt du select en json c'est de pouvoir facilement parser le résultat en java. On peut dans le select récupérer un grape de données complète. 
 
-Ici on récupérer le show et les episodes du show si ils existent. Pour récupérer les épisodes on va faire un select dans le select. 
-L'intéret est de complétement séparer ce qui de l'ordre du filtre : les shows que je veux trouver, et ce qui de l'ordre des données retournées : le détail du show et de ses épisodes. 
+Ici, on va récupérer le show et les episodes du show, s'ils existent. Pour récupérer les épisodes, on va faire un select dans le select. 
+L'intérêt est de complétement séparer ce qui de l'ordre du filtre : les shows que je veux trouver, et ce qui de l'ordre des données retournées : le détail du show et de ses épisodes. 
 
 Par exemple avec la requête suivante : 
 
@@ -333,8 +333,8 @@ curl -XGET 'http://localhost:8080/api/shows?size=5&type=TVSERIES&title=chainsaw%
 
 ## 5 select for update
 
-le `select for update` permet de comme son nom l'indique de selectionner dans l'idée de mettre à jour. 
-Les lignes selectionnées vont être lockées et ne pourront pas être accessible par d'autres.
+le `select for update` permet de comme son nom l'indique, de sélectionner dans l'idée de mettre à jour. 
+Les lignes sélectionnées vont être lockées et ne pourront pas être accessible par d'autres.
 
 Il existe 3 stratégies : 
 
@@ -342,18 +342,18 @@ Il existe 3 stratégies :
 2. `select * from ... for update skip locked` : dans ce cas si des lignes sont déjà utilisées, les lignées lockées seront ignorées dans ce select
 3. `select * from ... for update no wait` : dans ce cas une erreur sera retournée
 
-le select for update est a utiliser avec précaution, on voit vite les problème que ça pourrait entrainer. 
+le select for update est à utiliser avec précaution, on voit vite les problèmes que ça pourrait entrainer. 
 Un use case, c'est par exemple pour gérer des jobs dans un contexte ou notre application a plusieurs instances. 
 Pour éviter que les jobs soient executés autant de fois que d'instance d'appli, on peut utiliser le select for update pour gérer un singleton.   
 
 
 ## 6 stratégies de migration 
 
-Quand on doit faire évoluer nos modèles de données sans interruption de service, il y'a quelques précaution à prendre. 
+Quand on doit faire évoluer nos modèles de données sans interruption de service, il y a quelque précautions à prendre. 
 
 ### Créer un index 
 
-La création d'index pose un lock sur la table entière. Une solution pour éviter ce problème c'est le mot clé `concurrently`.
+La création d'index pose un lock sur la table entière. Une solution pour éviter ce problème, c'est le mot clé `concurrently`.
 
 ```sql
 create index concurrently if not exists episode_tconst_idx on episode(tconst);
@@ -363,7 +363,7 @@ create index concurrently if not exists episode_tconst_idx on episode(tconst);
 
 ### Foreign key 
 
-Déclarer une foreign key sur des données existantes, peut aussi poser problème. Un lock est posé sur la table et si il y'a du volume ça peut prendre énorement de temps car toutes les données vont être analysées. 
+Déclarer une foreign key sur des données existantes, peut aussi poser problème. Un lock est posé sur la table et si il y a du volume ça peut prendre énormément de temps, car toutes les données vont être analysées. 
 Si on sait que les données sont propres, on peut utiliser le mot clé `not valid`. 
 
 ```sql
@@ -373,7 +373,7 @@ ALTER TABLE episode
             ON DELETE CASCADE ON UPDATE NO ACTION not valid;
 ```
 
-Ceci va skipper l'analyse des données existantes, la contraintes sera validée sur les prochaines mises à jour. 
+Ceci va skipper l'analyse des données existantes, la contrainte sera validée sur les prochaines mises à jour. 
 
 Si on veut pouvoir passer les scripts plusieurs fois et donc éviter une erreur si la contrainte existe déjà, on peut faire comme ça : 
 
@@ -390,13 +390,13 @@ END $$;
 
 ### Ajouter une colonne et valoriser une donnée
 
-Si on veut ajouter une colonne et valoriser cette colonne sur une table à gros volume il probablement préférable de passer par une table intermédiaire. 
+Si on veut ajouter une colonne et valoriser cette colonne sur une table à gros volume il est probablement préférable de passer par une table intermédiaire. 
 
 1. Sur la table d'origine, on va renommer tous les index en `{INDEX}_TMP`. 
 2. on va créer une table temporaire qui est la table d'origine avec la colonne supplémentaire. 
 3. on peuple la table temporaire en faisant un `insert into table_tmp select ... from table`
 4. comme des données ont pu être mise à jour entre temps, dans une même transaction, on va 
-    * mettre à jour les dernière données `insert into table_tmp select ... from table where updated > now() - '1 hour'::interval on confict do update ...`
+    * mettre à jour les dernières données `insert into table_tmp select ... from table where updated > now() - '1 hour'::interval on confict do update ...`
     * renommer la table d'origine en `table_old` par exemple 
     * renommer la table `table_tmp` en `table`
     * on commit bien sur 
