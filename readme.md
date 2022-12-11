@@ -321,7 +321,7 @@ Exemple dans une API :
                  try {
                      return Mono.just(mapper.readValue(json, Movie.class));
                  } catch (JsonProcessingException e) {
-                     return Mono.error(e);
+                     return Mono.error(e);sle
                  }
              });
  }
@@ -333,7 +333,73 @@ curl -XGET 'http://localhost:8080/api/shows?size=5&type=TVSERIES&title=chainsaw%
 
 ## 5 select for update
 
+le `select for update` permet de comme son nom l'indique de selectionner dans l'idée de mettre à jour. 
+Les lignes selectionnées vont être lockées et ne pourront pas être accessible par d'autres.
+
+Il existe 3 stratégies : 
+
+1. `select * from ... for update` : dans ce cas on va attendre si les lignes requêtées sont déjà utilisées
+2. `select * from ... for update skip locked` : dans ce cas si des lignes sont déjà utilisées, les lignées lockées seront ignorées dans ce select
+3. `select * from ... for update no wait` : dans ce cas une erreur sera retournée
+
+le select for update est a utiliser avec précaution, on voit vite les problème que ça pourrait entrainer. 
+Un use case, c'est par exemple pour gérer des jobs dans un contexte ou notre application a plusieurs instances. 
+Pour éviter que les jobs soient executés autant de fois que d'instance d'appli, on peut utiliser le select for update pour gérer un singleton.   
+
+
 ## 6 stratégies de migration 
+
+Quand on doit faire évoluer nos modèles de données sans interruption de service, il y'a quelques précaution à prendre. 
+
+### Créer un index 
+
+La création d'index pose un lock sur la table entière. Une solution pour éviter ce problème c'est le mot clé `concurrently`.
+
+```sql
+create index concurrently if not exists episode_tconst_idx on episode(tconst);
+```
+
+### Foreign key 
+
+Déclarer une foreign key sur des données existantes, peut aussi poser problème. Un lock est posé sur la table et si il y'a du volume ça peut prendre énorement de temps car toutes les données vont être analysées. 
+Si on sait que les données sont propres, on peut utiliser le mot clé `not valid`. 
+
+```sql
+ALTER TABLE episode 
+    ADD CONSTRAINT episode_parenttconst_fk 
+        FOREIGN KEY ("parentTconst") REFERENCES show("tconst") 
+            ON DELETE CASCADE ON UPDATE NO ACTION not valid;
+```
+
+Ceci va skipper l'analyse des données existantes, la contraintes sera validée sur les prochaines mises à jour. 
+
+Si on veut pouvoir passer les scripts plusieurs fois et donc éviter une erreur si la contrainte existe déjà, on peut faire comme ça : 
+
+```sql
+DO $$ BEGIN
+IF NOT EXISTS (SELECT FROM pg_constraint WHERE conname = 'episode_parenttconst_fk') THEN
+ALTER TABLE episode
+    ADD CONSTRAINT episode_parenttconst_fk
+        FOREIGN KEY ("parentTconst") REFERENCES show("tconst")
+            ON DELETE CASCADE ON UPDATE NO ACTION not valid;
+END IF;
+END $$;
+```
+
+### Ajouter une colonne et valoriser une donnée
+
+Si on veut ajouter une colonne et valoriser cette colonne sur une table à gros volume il probablement préférable de passer par une table intermédiaire. 
+
+1. Sur la table d'origine, on va renommer tous les index en `{INDEX}_TMP`. 
+2. on va créer une table temporaire qui est la table d'origine avec la colonne supplémentaire. 
+3. on peuple la table temporaire en faisant un `insert into table_tmp select ... from table`
+4. comme des données ont pu être mise à jour entre temps, dans une même transaction, on va 
+    * mettre à jour les dernière données `insert into table_tmp select ... from table where updated > now() - '1 hour'::interval on confict do update ...`
+    * renommer la table d'origine en `table_old` par exemple 
+    * renommer la table `table_tmp` en `table`
+    * on commit bien sur 
+
+Avec cette méthode, pas d'interruption de service. 
 
 ## Jouer avec le projet 
 
