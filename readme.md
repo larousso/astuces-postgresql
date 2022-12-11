@@ -113,7 +113,7 @@ on conflict ("tconst")
     do update set search = excluded.search;
 ```
 
-Ou depuis postgresql 15 `MERGE` ? 
+Depuis postgresql 15, il existe `MERGE` mais pour le moment j'ai pas testé.  
 
 ## 3 returning 
 
@@ -358,6 +358,8 @@ La création d'index pose un lock sur la table entière. Une solution pour évit
 ```sql
 create index concurrently if not exists episode_tconst_idx on episode(tconst);
 ```
+
+**Attention** : `concurrently` ne fonctionne pas dans une transaction et il ne faut donc pas mettre ça des scripts liquibase par exemple. 
 
 ### Foreign key 
 
